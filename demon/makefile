@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -std=c11 -Wall -Wconversion -Werror -Wextra -Wpedantic
+CFLAGS = -std=c11 -Wall -Wconversion -Werror -Wextra -Wpedantic -pthread
 LDFLAGS =
 objects = demon.o
 executable = daemon_shm

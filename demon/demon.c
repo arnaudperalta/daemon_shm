@@ -3,9 +3,17 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <pthread.h>
+#include <semaphore.h>
+#include "thread_manager.h"
 
-#define TUBE_IN     "../tubes/daemon_shm_in"
-#define CONFIG_PATH "demon.conf"
+#define TUBE_IN        "../tubes/daemon_shm_in"
+#define CONFIG_PATH    "demon.conf"
+#define SHM_SEM_NAME   "/shm/shm_sem"
+
+#define OPTIONS_NUMBER 4
+#define FUN_SUCCESS    0
+#define FUN_FAILURE    -1
 
 typedef struct config {
 	size_t min_thread;
@@ -52,6 +60,31 @@ int main(void) {
       exit(EXIT_FAILURE);
     }
 	
+	// Création de la mémoire partagé de sémaphores que les threads utiliseront avec un
+	//	sémaphore par thread
+	int shm_sem = shm_open(SHM_SEM_NAME, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
+	if (shm_sem == -1) {
+		perror("Erreur shm_sem");
+		exit(EXIT_FAILURE);
+	}
+	
+	if (shm_unlink(SHM_SEM_NAME) == -1) {
+		perror("Erreur shm_unlink");
+		exit(EXIT_FAILURE);
+	}
+	
+	if (ftruncate(shm_fd, TAILLE_SHM) == -1) {
+		perror("ftruncate");
+		exit(EXIT_FAILURE);
+	}
+	
+	// Initilisation de MIN_THREAD threads
+	pthread_t *tab = ini_thread(cfg.min_thread, &(cfg.max_con_per_thread), shm_sem);
+	if (tab == NULL) {
+		perror("Erreur ini threads");
+		exit(EXIT_FAILURE);
+	}
+	
 	return EXIT_SUCCESS;
 }
 
@@ -59,7 +92,7 @@ int load_config(config *cfg) {
 	FILE *f = fopen(CONFIG_PATH, "r");
 	if (f == NULL) {
 		perror("Ouverture demon.conf impossible");
-		return -1;
+		return FUN_FAILURE;
 	}
 	// Lecture du fichier
 	int count = 0;
@@ -68,16 +101,16 @@ int load_config(config *cfg) {
 	count += fscanf(f, "MAX_CONNECT_PER_THREAD=%zu\n", &cfg->max_con_per_thread);
 	count += fscanf(f, "SHM_SIZE=%zu\n", &cfg->shm_size);
 	
-	if (count != 4) {
+	if (count != OPTIONS_NUMBER) {
 		perror("Erreur de syntaxe fichier config");
-		return -1;
+		return FUN_FAILURE;
 	}
 	
 	if (fclose(f) == -1) {
 		perror("Erreur fermeture demon.conf");
-		return -1;
+		return FUN_FAILURE;
 	}
-	return 0;
+	return FUN_SUCCESS;
 }
 
 void tube_listening(void) {
