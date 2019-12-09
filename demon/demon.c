@@ -4,7 +4,6 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <pthread.h>
-#include <semaphore.h>
 #include <string.h>
 #include "demon.h"
 #include "thread_manager.h"
@@ -12,12 +11,7 @@
 #define CONFIG_PATH        "demon.conf"
 
 #define OPTIONS_NUMBER     4
-#define FUN_SUCCESS        0
-#define FUN_FAILURE        -1
 #define MAX_COMMAND_LENGTH 100
-#define PID_LENGTH         5
-#define MES_LENGTH         4
-#define BUFFER_LENGTH      32
 
 typedef struct config {
 	size_t min_thread;

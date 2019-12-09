@@ -5,11 +5,6 @@
 #include "demon.h"
 #include "thread_manager.h"
 
-#define SHM_SIZE     1024
-#define NEUTRAL_FLAG 0
-#define DEMON_FLAG   1
-#define CLIENT_FLAG  2
-
 // Structure element stockant un thread avec son shm, son mutex etc ...
 typedef struct thread_e {
 	pthread_t thread;
