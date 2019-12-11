@@ -4,11 +4,12 @@
 // Fichier Header contenant des définitions communes au client et au démon
 
 #define MAX_CMD_LENGTH   100
+#define MAX_RES_LENGTH   1024
 #define TUBE_NAME_LENGTH 32
+#define SHM_NAME_LENGTH  32
 #define PID_LENGTH       5
 #define MSG_LENGTH       4
 #define BUFFER_SIZE      32
-#define SHM_SIZE         1024
 #define FUN_SUCCESS      0
 #define FUN_FAILURE      -1
 
@@ -26,8 +27,9 @@
 
 // Structure de données transféré dans le shm.
 typedef struct transfer {
-	volatile int flag;
-	volatile 
+  volatile int flag;
+  char command[MAX_CMD_LENGTH];
+  char result[MAX_RES_LENGTH];
 } transfer;
 
 #endif

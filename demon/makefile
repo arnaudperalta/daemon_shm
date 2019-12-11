@@ -1,9 +1,10 @@
-thread_managerdir = /thread_manager/
+thread_managerdir = thread_manager/
+defsdir = ../
 
 CC = gcc
-CFLAGS = -std=c11 -Wall -Wconversion -Werror -Wextra -Wpedantic -pthread -I$(thread_managerdir)
-LDFLAGS =
-VPATH = $(thread_managerdir)
+CFLAGS = -std=c11 -Wall -Wconversion -Werror -Wextra -Wpedantic -pthread -I$(defsdir) -I$(thread_managerdir)
+LDFLAGS = -lrt
+VPATH = $(thread_managerdir) $(defsdir)
 objects = demon.o $(thread_managerdir)thread_manager.o
 executable = daemon_shm
 
@@ -15,5 +16,5 @@ clean:
 $(executable): $(objects)
 	$(CC) $(objects) $(LDFLAGS) -o $(executable)
 
-demon.o: demon.c demon.h thread_manager.h
-thread_manager.o: thread_manager.c thread_manager.h
+$(thread_managerdir)thread_manager.o: thread_manager.c thread_manager.h defs.h
+demon.o: demon.c demon.h thread_manager.h defs.h
