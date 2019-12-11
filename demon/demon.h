@@ -1,6 +1,8 @@
 #ifndef DEMON__H
 #define DEMON__H
 
+#include "thread_manager.h"
+
 typedef struct config config;
 
 // Fonction qui charge le fichier de configuration en mémoire.

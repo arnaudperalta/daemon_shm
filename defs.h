@@ -9,7 +9,6 @@
 #define SHM_NAME_LENGTH  32
 #define PID_LENGTH       5
 #define MSG_LENGTH       4
-#define BUFFER_SIZE      32
 #define FUN_SUCCESS      0
 #define FUN_FAILURE      -1
 
@@ -21,13 +20,13 @@
 #define SYNC_MSG  "SYNC"
 #define END_MSG   "END"
 #define RST_MSG   "RST"
-#define SHM_NAME  "../shm/shm_thread_"
+#define SHM_NAME  "/shm_thread_"  //dans /dev/shm/
 #define TUBE_IN   "../tubes/daemon_in"
 #define TUBE_OUT  "../tubes/tube_"
 
 // Structure de données transféré dans le shm.
 typedef struct transfer {
-  volatile int flag;
+  volatile int *flag;
   char command[MAX_CMD_LENGTH];
   char result[MAX_RES_LENGTH];
 } transfer;
