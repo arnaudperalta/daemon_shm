@@ -40,10 +40,14 @@ thread_e *ini_thread_element(size_t number, size_t max_con) {
   
   char shmname[32];
   sprintf(shmname, "%s%ld", SHM_NAME, number);
+
   
   ptr->shm_fd = shm_open(shmname, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
   if (ptr->shm_fd == -1) {
     perror("Erreur création shm");
+    if (shm_unlink(shmname) == -1) {
+      perror("Erreur unlink shm");
+    }
     return NULL;
   }
   
@@ -51,6 +55,7 @@ thread_e *ini_thread_element(size_t number, size_t max_con) {
     perror("Erreur unlink shm");
     return NULL;
   }
+
   // On fixe la taille de notre shm. SHM_SIZE
   if (ftruncate(ptr->shm_fd, sizeof (transfer)) == -1) {
     perror("Erreur truncate shm thread");
@@ -78,15 +83,17 @@ thread_m *ini_thread(size_t min_thread, size_t max_con, size_t max_thread) {
   ptr->count = min_thread;
   
   // Allocation du tableau de pointeur de thread_e
-  ptr->array = malloc(sizeof (thread_e) * max_thread);
+  ptr->array = malloc(sizeof (thread_e *) * max_thread);
   if (ptr->array == NULL) {
     return NULL;
   }
   
   // Allocation de "min_thread" threads
   for (size_t i = 0; i < min_thread; ++i) {
+    printf("toto\n");
     ptr->array[i] = ini_thread_element(i, max_con);
     if (ptr->array[i] == NULL) {
+      printf("toti\n");
       return NULL;
     }
   }
@@ -110,7 +117,10 @@ void *waiting_command(void *arg) {
   res = popen(command, "r"); // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   
   // Envoi du résultat
-  fgets((char *) (ptr->data->command), MAX_CMD_LENGTH, res);
+  if (fgets((char *) (ptr->data->command), MAX_CMD_LENGTH, res) == NULL) {
+    perror("Erreur fgets");
+    return NULL;
+  }
   *(ptr->data->flag) = CLIENT_FLAG;
   
   // On unlock le thread

@@ -24,8 +24,8 @@ struct config {
 };
 
 int main(void) {
-  pid_t pid = fork();
-  //pid_t sid;
+  /*pid_t pid = fork();
+  pid_t sid;
   if (pid < 0) {
     perror("Erreur fork");
     exit(EXIT_FAILURE);
@@ -35,7 +35,7 @@ int main(void) {
   // Le démon est créé, on s'associe a un nouveau groupe de processus 
   // afin d'être leader du groupe. Donc pas de terminal de controle.
   
-  /*sid = setsid();
+  sid = setsid();
   if (sid < 0) {
     perror("Erreur création session"); 
     exit(EXIT_FAILURE);
@@ -60,12 +60,14 @@ int main(void) {
     perror("Erreur ini threads");
     exit(EXIT_FAILURE);
   }
+
+  free(ptr);
   
   // Mise en écoute du démon auprès des clients
-  if (tube_listening(&cfg, ptr) == -1) {
+  /*if (tube_listening(&cfg, ptr) == -1) {
     perror("Erreur tube_listening");
     exit(EXIT_FAILURE);
-  }
+  }*/
   
   return EXIT_SUCCESS;
 }
