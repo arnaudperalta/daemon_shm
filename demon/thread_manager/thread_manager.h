@@ -16,4 +16,6 @@ extern void *waiting_command(void *arg);
 
 extern int use_thread(thread_m *th, size_t max_con);
 
+extern int consume_thread(thread_m *th, size_t number);
+
 #endif

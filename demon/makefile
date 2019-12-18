@@ -6,7 +6,7 @@ CFLAGS = -std=c11 -Wall -Wconversion -Werror -Wextra -Wfatal-errors -Wpedantic -
 LDFLAGS = -pthread -lrt 
 VPATH = $(thread_managerdir) $(defsdir)
 objects = demon.o $(thread_managerdir)thread_manager.o
-executable = daemon_shm
+executable = demon
 
 all: $(executable)
 

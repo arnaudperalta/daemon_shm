@@ -43,31 +43,20 @@ int main(void) {
   config cfg;
   load_config(&cfg);
   
-  // Création du tube nommé que le programme client utilisera.
-  if (mkfifo(TUBE_IN, S_IRUSR | S_IWUSR) == -1) {
-    perror("Erreur création tube demon");
-    exit(EXIT_FAILURE);
-  }
-
-  if (unlink(TUBE_IN) == -1) {
-      perror("Erreur suppression tube demon");
-      exit(EXIT_FAILURE);
-    }
-  
   // Initilisation de MIN_THREAD threads
   thread_m *ptr = ini_thread(cfg.min_thread, cfg.max_con_per_thread, cfg.max_thread);
   if (ptr == NULL) {
     perror("Erreur ini threads");
     exit(EXIT_FAILURE);
   }
-
-  free(ptr);
   
   // Mise en écoute du démon auprès des clients
-  /*if (tube_listening(&cfg, ptr) == -1) {
+  if (tube_listening(&cfg, ptr) == -1) {
     perror("Erreur tube_listening");
     exit(EXIT_FAILURE);
-  }*/
+  }
+
+  // Fonction dispose qui sera appellé après un signal
   
   return EXIT_SUCCESS;
 }
@@ -84,6 +73,12 @@ int load_config(config *cfg) {
   count += fscanf(f, "MAX_THREAD=%zu\n", &cfg->max_thread);
   count += fscanf(f, "MAX_CONNECT_PER_THREAD=%zu\n", &cfg->max_con_per_thread);
   count += fscanf(f, "SHM_SIZE=%zu\n", &cfg->shm_size);
+
+  printf("Debug config :\n");
+  printf("min_thread : %zu\n", cfg->min_thread);
+  printf("max_thread : %zu\n", cfg->max_thread);
+  printf("max_con_per_thread : %zu\n", cfg->max_con_per_thread);
+  printf("shm_size : %zu\n", cfg->shm_size);
   
   if (count != OPTIONS_NUMBER) {
     perror("Erreur de syntaxe fichier config");
@@ -103,18 +98,31 @@ int tube_listening(config *cfg, thread_m *manager) {
   
   // File descriptor du tube client, on ne connait pas encore son nom
   int fd_out;
+
+  // Création du tube nommé que le programme client utilisera.
+  if (mkfifo(TUBE_IN, S_IRUSR | S_IWUSR) == -1) {
+    perror("Erreur création tube demon");
+    exit(EXIT_FAILURE);
+  }
   
   // File descriptor du demon
   int fd_in = open(TUBE_IN, O_RDONLY);
   if (fd_in == -1) {
+    printf("listen\n");
     perror("Erreur ouverture tube");
     return EXIT_FAILURE;
+  }
+
+  if (unlink(TUBE_IN) == -1) {
+      perror("Erreur suppression tube demon");
+      exit(EXIT_FAILURE);
   }
   
   ssize_t n;
   int thread_number;
   while (1) {
-    // Les messages recu seront de la forme 00XXXSYNC\0 ou 00XXXEND\0 (x : pid)
+    // Les messages recu seront de la forme 00XXXSYNC\0 x : pid
+    //   ou 00XXXEND\0 x : thread_number
     char buffer_read[PID_LENGTH + MSG_LENGTH + 1];
     
     // Les messages envoyés seront de la forme RST ou SHM_NAMEXXX (X : numero du thread)
@@ -163,6 +171,8 @@ int tube_listening(config *cfg, thread_m *manager) {
           perror("Erreur close tube client");
           return FUN_FAILURE;
         }
+      } else if (strcmp(END_MSG, buffer_read + PID_LENGTH) == 0) {
+        if (consume_thread(thread_m *th, size_t number)
       }
     }
     printf("Client fini\n");

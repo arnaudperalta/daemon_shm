@@ -26,7 +26,7 @@
 
 // Structure de données transféré dans le shm.
 typedef struct transfer {
-  volatile int *flag;
+  volatile int flag;
   char command[MAX_CMD_LENGTH];
   char result[MAX_RES_LENGTH];
 } transfer;
