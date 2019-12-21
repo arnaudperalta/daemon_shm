@@ -17,27 +17,46 @@
 int digit_count(int n);
 
 int main(void) {
-  pid_t pid = getpid();
   char shm_name[SHM_NAME_LENGTH];
   char tube_name[TUBE_NAME_LENGTH];
+  
+  pid_t pid = getpid();
   sprintf(tube_name, "%s%d", TUBE_OUT, pid);
   
-  // Ouverture du tube client
-  if (open_client_tube(tube_name) == FUN_FAILURE) {
-    perror("Erreur ouverture tube client");
+  // Création et ouverture du tube client
+  if (create_client_tube(tube_name) == FUN_FAILURE) {
+    perror("Erreur create_client_tube");
+    exit(EXIT_FAILURE);
+  }
+  
+  // Ouverture tube demon
+  int fd_demon = open_demon_tube();
+  if (fd_demon == FUN_FAILURE) {
+    perror("Erreur open_demon_tube");
     exit(EXIT_FAILURE);
   }
   
   // Demande de synchronisation avec le démon
-  if (send_daemon(pid, SYNC_MSG) == FUN_FAILURE) {
+  if (send_daemon(fd_demon, (size_t) pid, SYNC_MSG) == FUN_FAILURE) {
     perror("Erreur send_daemon");
     exit(EXIT_FAILURE);
   }
-
-  int thread_number = receive_daemon(tube_name, shm_name);
-  if (thread_number == NO_THREAD) {
-    perror("Plus de threads disponibles");
+  
+  // Ouverture du tube
+  int fd_client = open_client_tube(tube_name);
+  if (fd_client == FUN_FAILURE) {
+    perror("Erreur open_client_tube");
     exit(EXIT_FAILURE);
+  }
+
+  // Réception du numéro du shm et fermeture du tube
+  int thread_number = receive_daemon(fd_client, shm_name);
+  if (thread_number == FUN_FAILURE) {
+    perror("Erreur receive_daemon");
+    exit(EXIT_FAILURE);
+  } else if (thread_number == NO_THREAD) {
+    printf("Fermeture du programme, pas de thread disponible\n");
+    exit(EXIT_SUCCESS);
   }
   
   char command[MAX_CMD_LENGTH];
@@ -45,7 +64,9 @@ int main(void) {
   int length;
 
   // Début du prompt
-  while ((length = scanf(BEGIN "%s", command)) != EOF && strcmp(command, QUIT_CMD) != 0) {
+  printf(BEGIN);
+  while ((length = scanf("%s", command)) != EOF 
+      && strcmp(command, QUIT_CMD) != 0) {
     // La commande lue est trop longue
     if (length > MAX_CMD_LENGTH) {
       perror("Commande trop longue.");
@@ -59,78 +80,93 @@ int main(void) {
       perror("Erreur receive_thread");
       exit(EXIT_FAILURE);
     }
+    printf("%s\n", result);
+    printf(BEGIN);
   }
   
-  if (send_daemon(pid, END_MSG) == -1) {
+  // Envoi de END car plus de commande a executé
+  if (send_daemon(fd_client, (size_t) pid, END_MSG) == -1) {
     exit(EXIT_FAILURE);
+  }
+  
+  // Fermeture du tube restant
+  if (close(fd_demon) == FUN_FAILURE) {
+    perror("Erreur fermeture tube demon");
+    exit(EXIT_SUCCESS);
   }
   
   return EXIT_SUCCESS;
 }
 
-int open_client_tube(char *tube_name) {
-  
+int create_client_tube(char *tube_name) {
   // Création du tube nommé que le programme démon utilisera.
-  if (mkfifo(tube_name, S_IRUSR | S_IWUSR) == -1) {
+  if (mkfifo(tube_name, S_IRUSR | S_IWUSR) == FUN_FAILURE) {
     perror("Erreur création tube client");
     return FUN_FAILURE;
   }
-
-  if (unlink(tube_name) == -1) {
-      perror("Erreur suppression tube client");
-      return FUN_FAILURE;
-    }
-    
-    return FUN_SUCCESS;
+  return FUN_SUCCESS;
 }
 
-int send_daemon(pid_t pid, char *msg) {
-  // Ecriture de la commande a envoyée (OOXXXSYNC\0 ou OOXXXEND\0)
-  char full_msg[PID_LENGTH + strlen(msg) + 1];
-  memset(full_msg, '0', PID_LENGTH + strlen(msg) + 1);
-  sprintf(full_msg + PID_LENGTH - digit_count(pid), "%d%s", pid, msg);
-  
-  // Envoi du message
-  int fd = open(TUBE_IN, O_WRONLY);
-  if (fd == -1) {
+int open_client_tube(char *tube_name) {
+  int fd = open(tube_name, O_RDONLY);
+  if (fd == FUN_FAILURE) {
     perror("Erreur ouverture tube démon");
     return FUN_FAILURE;
   }
-  
-  if (write(fd, full_msg, sizeof full_msg) == -1) {
-    perror("Erreur écriture tube démon");
+
+  /*if (unlink(tube_name) == -1) {
+    perror("Erreur suppression tube client");
+    return FUN_FAILURE;
+  }*/
+  return fd;
+}
+
+int open_demon_tube(void) {
+  int fd = open(TUBE_IN, O_WRONLY);
+  if (fd == FUN_FAILURE) {
+    perror("Erreur ouverture tube demon");
     return FUN_FAILURE;
   }
   
-  if (close(fd) == -1) {
-    perror("Erreur close tube démon");
+  if (unlink(TUBE_IN) == FUN_FAILURE) {
+    perror("Erreur supression tube demon");
+    return FUN_FAILURE;
+  }
+  return fd;
+}
+
+int send_daemon(int fd_tube, size_t label, char *msg) {
+  // Ecriture de la commande a envoyée (SYNCXXX\0 ou ENDYYY\0)
+  // XXX : pid, YYY : numéro shm
+  char full_msg[(int) strlen(msg) + digit_count((int) label) + 1];
+  sprintf(full_msg, "%s%zu", msg, label);
+  
+  if (write(fd_tube, full_msg, sizeof full_msg) == FUN_FAILURE) {
+    perror("Erreur écriture tube démon");
     return FUN_FAILURE;
   }
   
   return FUN_SUCCESS;
 }
 
-int receive_daemon(char *tube_name, char *shm_name) {
+int receive_daemon(int fd_client, char *shm_name) {
   // Réception de la réponse
-  int fd = open(tube_name, O_RDONLY);
-  if (fd == -1) {
-    perror("Erreur ouverture tube client");
-    return FUN_FAILURE;
-  }
-  
-  char reponse[BUFFER_SIZE];
-  if (read(fd, reponse, sizeof reponse) != sizeof (int)) {
+  char reponse[SHM_NAME_LENGTH];
+  if (read(fd_client, reponse, sizeof reponse) == FUN_FAILURE) {
     perror("Erreur read tube client");
     return FUN_FAILURE;
   }
+  // Si le message envoyé est RST, aucun thread n'est disponible
   if (strcmp(reponse, RST_MSG) == 0) {
     return NO_THREAD;
   }
   
+  // Copie du nom de la shm
   strcpy(shm_name, reponse);
-
-  if (close(fd) == -1) {
-    perror("Erreur close tube démon");
+  
+  // On ne réutilisera pas ce tube
+  if (close(fd_client) == FUN_FAILURE) {
+    perror("Erreur fermeture tube client");
     return FUN_FAILURE;
   }
   
@@ -138,13 +174,23 @@ int receive_daemon(char *tube_name, char *shm_name) {
 }
 
 int send_thread(char *shm_name, char *command) {
-  int shm_fd = shm_open(shm_name, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
+  int shm_fd = shm_open(shm_name, O_RDWR | O_EXCL, S_IRUSR | S_IWUSR);
   if (shm_fd == FUN_FAILURE) {
     perror("Erreur shm_open send_thread");
     return FUN_FAILURE;
   }
   
-  transfer *ptr = mmap(NULL, sizeof (transfer), PROT_WRITE, MAP_SHARED, shm_fd, 0);
+  if (ftruncate(shm_fd, sizeof(transfer)) == FUN_FAILURE) {
+    perror("Erreur ftruncate");
+    return FUN_FAILURE;
+  }
+  
+  transfer *ptr = malloc(sizeof (transfer));
+  if (ptr == NULL) {
+    return FUN_FAILURE;
+  }
+  
+  ptr = mmap(NULL, sizeof (transfer), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
   if (ptr == MAP_FAILED) {
     perror("Erreur mmap send_thread");
     return FUN_FAILURE;
@@ -162,13 +208,23 @@ int send_thread(char *shm_name, char *command) {
 }
 
 int receive_thread(char *shm_name, char *result) {
-  int shm_fd = shm_open(shm_name, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
+  int shm_fd = shm_open(shm_name, O_RDWR | O_EXCL, S_IRUSR | S_IWUSR);
   if (shm_fd == FUN_FAILURE) {
     perror("Erreur shm_open receive_thread");
     return FUN_FAILURE;
   }
   
-  transfer *ptr = mmap(NULL, sizeof (transfer), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+  transfer *ptr = malloc(sizeof (transfer));
+  if (ptr == NULL) {
+    return FUN_FAILURE;
+  }
+  
+  if (ftruncate(shm_fd, sizeof(transfer)) == FUN_FAILURE) {
+    perror("Erreur ftruncate");
+    return FUN_FAILURE;
+  }
+  
+  ptr = mmap(NULL, sizeof (transfer), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
   if (ptr == MAP_FAILED) {
     perror("Erreur mmap receive_thread");
     return FUN_FAILURE;

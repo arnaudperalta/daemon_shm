@@ -11,7 +11,8 @@
 #include "thread_manager.h"
 #include "defs.h"
 
-#define CONFIG_PATH        "demon.conf"
+#define CONFIG_PATH "demon.conf"
+#define ARG_DEBUG   "--debug"      
 
 #define OPTIONS_NUMBER     4
 #define MAX_COMMAND_LENGTH 100
@@ -23,23 +24,30 @@ struct config {
   size_t shm_size;
 };
 
-int main(void) {
-  /*pid_t pid = fork();
-  pid_t sid;
-  if (pid < 0) {
-    perror("Erreur fork");
-    exit(EXIT_FAILURE);
-  } else if (pid > 0) {
-    return EXIT_SUCCESS;
+int main(int argc, char **argv) {
+  if (argc > 1 && strcmp(argv[1], ARG_DEBUG) == 0) {
+    printf("daemon_shm Debug mode :\n");
+    printf("--------------------------\n");
+  } else {
+    pid_t pid = fork();
+    pid_t sid;
+    if (pid < 0) {
+      perror("Erreur fork");
+      exit(EXIT_FAILURE);
+    } else if (pid > 0) {
+      return EXIT_SUCCESS;
+    }
+    // Le démon est créé, on s'associe a un nouveau groupe de processus 
+    // afin d'être leader du groupe. Donc pas de terminal de controle.
+    
+    sid = setsid();
+    if (sid < 0) {
+      perror("Erreur création session"); 
+      exit(EXIT_FAILURE);
+    }
   }
-  // Le démon est créé, on s'associe a un nouveau groupe de processus 
-  // afin d'être leader du groupe. Donc pas de terminal de controle.
   
-  sid = setsid();
-  if (sid < 0) {
-    perror("Erreur création session"); 
-    exit(EXIT_FAILURE);
-  }*/
+  // Lecture du fichier de configuration
   config cfg;
   load_config(&cfg);
   
@@ -74,11 +82,11 @@ int load_config(config *cfg) {
   count += fscanf(f, "MAX_CONNECT_PER_THREAD=%zu\n", &cfg->max_con_per_thread);
   count += fscanf(f, "SHM_SIZE=%zu\n", &cfg->shm_size);
 
-  printf("Debug config :\n");
+  printf("Config :\n");
   printf("min_thread : %zu\n", cfg->min_thread);
   printf("max_thread : %zu\n", cfg->max_thread);
   printf("max_con_per_thread : %zu\n", cfg->max_con_per_thread);
-  printf("shm_size : %zu\n", cfg->shm_size);
+  printf("shm_size : %zu\n\n", cfg->shm_size);
   
   if (count != OPTIONS_NUMBER) {
     perror("Erreur de syntaxe fichier config");
@@ -93,11 +101,19 @@ int load_config(config *cfg) {
 }
 
 int tube_listening(config *cfg, thread_m *manager) {
-  // PID du client qui est en train d'établir une connection
-  char client_pid[PID_LENGTH + 1];
-  
   // File descriptor du tube client, on ne connait pas encore son nom
-  int fd_out;
+  int fd_client;
+  
+  // Les messages recu seront de la forme SYNCXXX\0 X : pid
+  //   ou ENDYYY\0 y : shm_number
+  char buffer_read[PID_LENGTH + MSG_LENGTH + 1];
+  
+  // Les messages envoyés seront de la forme RST ou SHM_NAMEXXX (X : numero du thread)
+  char buffer_write[SHM_NAME_LENGTH] = {'0'};
+  
+  // Préfixe supposé du tube client
+  char tube_name[strlen(TUBE_OUT) + PID_LENGTH + 1];
+  strcpy(tube_name, TUBE_OUT);
 
   // Création du tube nommé que le programme client utilisera.
   if (mkfifo(TUBE_IN, S_IRUSR | S_IWUSR) == -1) {
@@ -106,43 +122,30 @@ int tube_listening(config *cfg, thread_m *manager) {
   }
   
   // File descriptor du demon
-  int fd_in = open(TUBE_IN, O_RDONLY);
-  if (fd_in == -1) {
-    printf("listen\n");
+  int fd_demon = open(TUBE_IN, O_RDONLY);
+  if (fd_demon == -1) {
     perror("Erreur ouverture tube");
     return EXIT_FAILURE;
   }
 
-  if (unlink(TUBE_IN) == -1) {
+  /*if (unlink(TUBE_IN) == -1) {
       perror("Erreur suppression tube demon");
       exit(EXIT_FAILURE);
-  }
+  }*/
   
   ssize_t n;
   int thread_number;
   while (1) {
-    // Les messages recu seront de la forme 00XXXSYNC\0 x : pid
-    //   ou 00XXXEND\0 x : thread_number
-    char buffer_read[PID_LENGTH + MSG_LENGTH + 1];
-    
-    // Les messages envoyés seront de la forme RST ou SHM_NAMEXXX (X : numero du thread)
-    char buffer_write[SHM_NAME_LENGTH];
-    
-    // Nom supposé du tube client
-    char tube_name[strlen(TUBE_OUT) + PID_LENGTH + 1];
-    strcat(tube_name, TUBE_OUT);
-    
-    while ((n = read(fd_in, buffer_read, sizeof buffer_read)) > 0) {
+    while ((n = read(fd_demon, buffer_read, sizeof buffer_read)) > 0) {
       // Le client envoie SYNC avec son PID
-      if (strcmp(SYNC_MSG, buffer_read + PID_LENGTH) == 0) {
+      if (strncmp(SYNC_MSG, buffer_read, strlen(SYNC_MSG)) == 0) {
         // Récupération d'un numero de thread libre puis on averti
         //   le client du nom du shm a écouté.
-        sprintf(buffer_read, "%5s", client_pid);
-        strcat(tube_name, client_pid);
+        strcat(tube_name, buffer_read + strlen(SYNC_MSG));
         
         // Ouverture du tube client
-        fd_out = open(tube_name, O_WRONLY);
-        if (fd_out == -1) {
+        fd_client = open(tube_name, O_WRONLY);
+        if (fd_client == -1) {
           perror("Erreur ouverture tube client");
           return FUN_FAILURE;
         }
@@ -151,28 +154,33 @@ int tube_listening(config *cfg, thread_m *manager) {
           perror("Unlink tube client");
           return FUN_FAILURE;
         }
-        
         thread_number = use_thread(manager, cfg->max_con_per_thread);
         if (thread_number == -1) {
           // Pas de thread dispo, on envoie RST
-          if (write(fd_out, RST_MSG, sizeof RST_MSG) == -1) {
+          if (write(fd_client, RST_MSG, sizeof RST_MSG) == -1) {
             perror("Erreur écriture tube client");
             return FUN_FAILURE;
           }
         } else {
           // Un thread est disponible, on envoie donc le nom du shm au client
           sprintf(buffer_write, "%s%d", SHM_NAME, thread_number);
-          if (write(fd_out, buffer_write, sizeof buffer_write) == -1) {
+          if (write(fd_client, buffer_write, sizeof buffer_write) == -1) {
             perror("Erreur écriture tube client");
             return FUN_FAILURE;
           }
         }
-        if (close(fd_out) == -1) {
+        if (close(fd_client) == -1) {
           perror("Erreur close tube client");
           return FUN_FAILURE;
         }
-      } else if (strcmp(END_MSG, buffer_read + PID_LENGTH) == 0) {
-        if (consume_thread(thread_m *th, size_t number)
+      } else if (strncmp(END_MSG, buffer_read, strlen(END_MSG)) == 0) {
+        // Numero du thread où on annule une connection
+        char number[THR_LENGTH + 1];
+        strcpy(number, buffer_read + strlen(END_MSG));
+        // On dit au thread d'arrêter son execution
+        if (consume_thread(manager, atoi(number) == -1)) {
+          return FUN_FAILURE;
+        }
       }
     }
     printf("Client fini\n");

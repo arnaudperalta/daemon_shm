@@ -1,11 +1,15 @@
 #ifndef CLIENT__H
 #define CLIENT__H
 
-int open_client_tube(char *tube_name);
+extern int create_client_tube(char *tube_name);
 
-int send_daemon(pid_t pid, char *msg);
+extern int open_client_tube(char *tube_name);
 
-int receive_daemon(char *tube_name, char *shm_name);
+extern int open_demon_tube(void);
+
+extern int send_daemon(int fd_tube, size_t label, char *msg);
+
+extern int receive_daemon(int fd_client, char *shm_name);
 
 int send_thread(char *shm_name, char *command);
 

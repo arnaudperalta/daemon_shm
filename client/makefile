@@ -1,11 +1,11 @@
 defsdir = ../
 
 CC = gcc
-CFLAGS = -std=c11 -Wall -Wconversion -Werror -Wextra -Wpedantic -pthread -I$(defsdir)
+CFLAGS = -std=c11 -g -Wall -Wconversion -Werror -Wextra -Wpedantic -pthread -I$(defsdir)
 LDFLAGS = -lrt
 VPATH = $(defsdir)
 objects = client.o
-executable = client_shm
+executable = client
 
 all: $(executable)
 

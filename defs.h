@@ -7,7 +7,8 @@
 #define MAX_RES_LENGTH   1024
 #define TUBE_NAME_LENGTH 32
 #define SHM_NAME_LENGTH  32
-#define PID_LENGTH       5
+#define PID_LENGTH       7
+#define THR_LENGTH       5
 #define MSG_LENGTH       4
 #define FUN_SUCCESS      0
 #define FUN_FAILURE      -1

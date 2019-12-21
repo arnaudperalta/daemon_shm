@@ -39,10 +39,9 @@ thread_e *ini_thread_element(size_t number, size_t max_con) {
     perror("Error pthread mutex");
     return NULL;
   }
-  pthread_create(&(ptr->thread), NULL, waiting_command, ptr);
   ptr->con_left = max_con;
   
-  char shmname[32];
+  char shmname[SHM_NAME_LENGTH];
   sprintf(shmname, "%s%ld", SHM_NAME, number);
 
   // Allocation de la shm du thread
@@ -54,9 +53,6 @@ thread_e *ini_thread_element(size_t number, size_t max_con) {
   ptr->shm_fd = shm_open(shmname, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
   if (ptr->shm_fd == -1) {
     perror("Erreur création shm");
-    if (shm_unlink(shmname) == -1) {
-      perror("Erreur unlink shm");
-    }
     return NULL;
   }
 
@@ -71,11 +67,18 @@ thread_e *ini_thread_element(size_t number, size_t max_con) {
     perror("Erreur map");
     return NULL;
   }
-
-  printf("%s\n", shmname);
   
-  // Initialisation du point de rendez-vous
+  /*if (shm_unlink(shmname) == FUN_FAILURE) {
+    return NULL;
+  }*/
+  
+  // Initialisation du point de rendez-vous et du flag d'arrêt
+  ptr->end = false;
   ptr->data->flag = NEUTRAL_FLAG;
+  
+  // Lancement du thread
+  pthread_create(&(ptr->thread), NULL, waiting_command, ptr);
+  
   return ptr;
 }
 
@@ -88,8 +91,9 @@ thread_m *ini_thread(size_t min_thread, size_t max_con, size_t max_thread) {
   }
   ptr->count = min_thread;
   ptr->min_thread = min_thread;
+  ptr->max_thread = max_thread;
   // Allocation du tableau de pointeur de thread_e
-  ptr->array = calloc(sizeof (thread_e *) * max_thread);
+  ptr->array = calloc(1, sizeof (thread_e *) * max_thread);
   if (ptr->array == NULL) {
     return NULL;
   }
@@ -108,11 +112,11 @@ thread_m *ini_thread(size_t min_thread, size_t max_con, size_t max_thread) {
 
 void *waiting_command(void *arg) {
   thread_e *ptr = (thread_e *) arg;
+  
   // Pointeur de fichier contenant le stdout de la commande a executé
   FILE *res;
   char command[MAX_CMD_LENGTH];
-
-  printf("J'attends !\n");
+  
   while (!ptr->end) {
     // Lecture d'une commande
     while (ptr->data->flag != DEMON_FLAG);
@@ -124,7 +128,7 @@ void *waiting_command(void *arg) {
     res = popen(command, "r"); // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     
     // Envoi du résultat
-    if (fgets((char *) (ptr->data->command), MAX_CMD_LENGTH, res) == NULL) {
+    if (fgets((char *) (ptr->data->result), MAX_CMD_LENGTH, res) == NULL) {
       perror("Erreur fgets");
       return NULL;
     }
@@ -139,11 +143,12 @@ void *waiting_command(void *arg) {
 int use_thread(thread_m *th, size_t max_con) {
   for (size_t i = 0; i < th->max_thread; ++i) {
     // On verifie si ce thread est libre d'utilsation
-    if (th->array[number] == NULL ||
+    if (th->array[i] == NULL ||
         pthread_mutex_trylock(&(th->array[i]->mutex)) == 0) {
       // Un thread a été trouvé
       pthread_mutex_unlock(&(th->array[i]->mutex));
       --th->array[i]->con_left;
+      printf("Thread choisi : %zu\n", i);
       return (int) i;
     }
   }
@@ -158,6 +163,7 @@ int use_thread(thread_m *th, size_t max_con) {
 }
 
 int consume_thread(thread_m *th, size_t number) {
+  // On regarde si le thread à atteint sa fin de vie
   if (th->array[number]->con_left == 1) {
     // On indique au thread qu'il s'arrête totalement
     th->array[number]->end = true;
@@ -165,9 +171,8 @@ int consume_thread(thread_m *th, size_t number) {
       perror("pthread_join");
       return FUN_FAILURE;
     }
-    if (shm_unlink(th->array[number]->shm_fd) == FUN_FAILURE) {
-      return FUN_FAILURE;
-    }
+    char shmname[SHM_NAME_LENGTH];
+    sprintf(shmname, "%s%ld", SHM_NAME, number);
     free(th->array[number]->data);
     free(th->array[number]);
     th->array[number] = NULL;
