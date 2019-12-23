@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -7,6 +8,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <fcntl.h>
+#include <signal.h>
 #include "demon.h"
 #include "thread_manager.h"
 #include "defs.h"
@@ -17,6 +19,12 @@
 #define OPTIONS_NUMBER     4
 #define MAX_COMMAND_LENGTH 100
 
+// Variable global de debug, on la met a true si --debug est saisi
+static bool debug = false;
+
+// Fonction de nettoyage des données systeme et mémoire.
+void clear_sys_structs(int sig);
+
 struct config {
   size_t min_thread;
   size_t max_thread;
@@ -26,6 +34,7 @@ struct config {
 
 int main(int argc, char **argv) {
   if (argc > 1 && strcmp(argv[1], ARG_DEBUG) == 0) {
+	debug = true;
     printf("daemon_shm Debug mode :\n");
     printf("--------------------------\n");
   } else {
@@ -58,13 +67,15 @@ int main(int argc, char **argv) {
     exit(EXIT_FAILURE);
   }
   
+  // Nettoyage des structures systèmes sur le signal SIGINT
+  // On dispose aussi les structures de données.
+  signal(SIGINT, clear_sys_structs);
+  
   // Mise en écoute du démon auprès des clients
   if (tube_listening(&cfg, ptr) == -1) {
     perror("Erreur tube_listening");
     exit(EXIT_FAILURE);
   }
-
-  // Fonction dispose qui sera appellé après un signal
   
   return EXIT_SUCCESS;
 }
@@ -110,10 +121,6 @@ int tube_listening(config *cfg, thread_m *manager) {
   
   // Les messages envoyés seront de la forme RST ou SHM_NAMEXXX (X : numero du thread)
   char buffer_write[SHM_NAME_LENGTH] = {'0'};
-  
-  // Préfixe supposé du tube client
-  char tube_name[strlen(TUBE_OUT) + PID_LENGTH + 1];
-  strcpy(tube_name, TUBE_OUT);
 
   // Création du tube nommé que le programme client utilisera.
   if (mkfifo(TUBE_IN, S_IRUSR | S_IWUSR) == -1) {
@@ -128,19 +135,22 @@ int tube_listening(config *cfg, thread_m *manager) {
     return EXIT_FAILURE;
   }
 
-  /*if (unlink(TUBE_IN) == -1) {
-      perror("Erreur suppression tube demon");
-      exit(EXIT_FAILURE);
-  }*/
-  
-  ssize_t n;
-  int thread_number;
   while (1) {
+	ssize_t n = 0;
     while ((n = read(fd_demon, buffer_read, sizeof buffer_read)) > 0) {
+	  // Préfixe supposé du tube client
+	  char tube_name[strlen(TUBE_OUT) + PID_LENGTH + 1];
+	  strcpy(tube_name, TUBE_OUT);
+	  
       // Le client envoie SYNC avec son PID
       if (strncmp(SYNC_MSG, buffer_read, strlen(SYNC_MSG)) == 0) {
         // Récupération d'un numero de thread libre puis on averti
         //   le client du nom du shm a écouté.
+        if (debug) {
+			printf("Connection du processus %s\n", 
+				buffer_read + strlen(SYNC_MSG));
+		}
+		printf("buffer : %s\n", buffer_read);
         strcat(tube_name, buffer_read + strlen(SYNC_MSG));
         
         // Ouverture du tube client
@@ -154,13 +164,14 @@ int tube_listening(config *cfg, thread_m *manager) {
           perror("Unlink tube client");
           return FUN_FAILURE;
         }
-        thread_number = use_thread(manager, cfg->max_con_per_thread);
+        int thread_number = use_thread(manager, cfg->max_con_per_thread);
         if (thread_number == -1) {
           // Pas de thread dispo, on envoie RST
           if (write(fd_client, RST_MSG, sizeof RST_MSG) == -1) {
             perror("Erreur écriture tube client");
             return FUN_FAILURE;
           }
+          if (debug) printf("RST envoyé\n");
         } else {
           // Un thread est disponible, on envoie donc le nom du shm au client
           sprintf(buffer_write, "%s%d", SHM_NAME, thread_number);
@@ -168,6 +179,7 @@ int tube_listening(config *cfg, thread_m *manager) {
             perror("Erreur écriture tube client");
             return FUN_FAILURE;
           }
+          if (debug) printf("Thread %d choisi\n", thread_number);
         }
         if (close(fd_client) == -1) {
           perror("Erreur close tube client");
@@ -181,8 +193,26 @@ int tube_listening(config *cfg, thread_m *manager) {
         if (consume_thread(manager, atoi(number) == -1)) {
           return FUN_FAILURE;
         }
+        if (debug) {
+			printf("Connection terminé avec %s\n",
+			    buffer_read + strlen(END_MSG));
+		}
       }
     }
-    printf("Client fini\n");
   }
+}
+
+void clear_sys_structs(int sig) {
+	// Nettoyage tube demon
+	unlink(TUBE_IN);
+	// Nettoyage SHM
+	sig = 0;
+	int i = 0;
+	char shm_name[SHM_NAME_LENGTH];
+	do {
+		sprintf(shm_name, "%s%d", SHM_NAME, i);
+		++i;
+		sig = shm_unlink(shm_name);
+	} while (sig != FUN_FAILURE);
+	exit(EXIT_SUCCESS);
 }

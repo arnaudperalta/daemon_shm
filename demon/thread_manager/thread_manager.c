@@ -16,7 +16,6 @@ typedef struct thread_e {
   pthread_t thread;
   pthread_mutex_t mutex;
   size_t con_left; // Connection restante
-  int shm_fd; // Mémoire partagé du thread
   transfer *data;  // 0 de base, 1 pour une donnée reservé au demon, 2 pour le client
   volatile bool end; // Entier de controle qui indique la fin d'une connection
 } thread_e;
@@ -43,34 +42,29 @@ thread_e *ini_thread_element(size_t number, size_t max_con) {
   
   char shmname[SHM_NAME_LENGTH];
   sprintf(shmname, "%s%ld", SHM_NAME, number);
-
-  // Allocation de la shm du thread
-  ptr->data = malloc(sizeof (transfer));
-  if (ptr->data == NULL) {
-    return NULL;
-  }
   
-  ptr->shm_fd = shm_open(shmname, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
-  if (ptr->shm_fd == -1) {
+  int shm_fd = shm_open(shmname, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
+  if (shm_fd == -1) {
     perror("Erreur création shm");
     return NULL;
   }
 
   // On fixe la taille de notre shm. SHM_SIZE
-  if (ftruncate(ptr->shm_fd, sizeof ptr->data) == -1) {
+  if (ftruncate(shm_fd, sizeof ptr->data) == -1) {
     perror("Erreur truncate shm thread");
     return NULL;
   }
 
-  ptr->data = mmap(NULL, sizeof ptr->data, PROT_READ | PROT_WRITE, MAP_SHARED, ptr->shm_fd, 0);
+  ptr->data = mmap(NULL, sizeof ptr->data, PROT_READ | PROT_WRITE, 
+      MAP_SHARED, shm_fd, 0);
   if (ptr->data == MAP_FAILED) {
     perror("Erreur map");
     return NULL;
   }
   
-  /*if (shm_unlink(shmname) == FUN_FAILURE) {
+  if (close(shm_fd) == FUN_FAILURE) {
     return NULL;
-  }*/
+  }
   
   // Initialisation du point de rendez-vous et du flag d'arrêt
   ptr->end = false;
@@ -101,7 +95,6 @@ thread_m *ini_thread(size_t min_thread, size_t max_con, size_t max_thread) {
   // Allocation de "min_thread" threads
   for (size_t i = 0; i < min_thread; ++i) {
     ptr->array[i] = ini_thread_element(i, max_con);
-    printf("Thread %zu initialisé\n", i);
     if (ptr->array[i] == NULL) {
       return NULL;
     }
@@ -148,7 +141,6 @@ int use_thread(thread_m *th, size_t max_con) {
       // Un thread a été trouvé
       pthread_mutex_unlock(&(th->array[i]->mutex));
       --th->array[i]->con_left;
-      printf("Thread choisi : %zu\n", i);
       return (int) i;
     }
   }
@@ -187,5 +179,3 @@ int consume_thread(thread_m *th, size_t number) {
   }
   return FUN_SUCCESS;
 }
-
-//void thread_dispose(void);

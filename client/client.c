@@ -10,7 +10,7 @@
 #include "client.h"
 
 #define QUIT_CMD  "quit"
-#define BEGIN     "client_shm>"
+#define BEGIN     "client>"
 #define NO_THREAD -2
 
 // Fonction locale qui compte le nombre de décimal d'un entier
@@ -37,8 +37,8 @@ int main(void) {
   }
   
   // Demande de synchronisation avec le démon
-  if (send_daemon(fd_demon, (size_t) pid, SYNC_MSG) == FUN_FAILURE) {
-    perror("Erreur send_daemon");
+  if (send_demon(fd_demon, (size_t) pid, SYNC_MSG) == FUN_FAILURE) {
+    perror("Erreur send_demon");
     exit(EXIT_FAILURE);
   }
   
@@ -50,9 +50,9 @@ int main(void) {
   }
 
   // Réception du numéro du shm et fermeture du tube
-  int thread_number = receive_daemon(fd_client, shm_name);
+  int thread_number = receive_demon(fd_client, shm_name);
   if (thread_number == FUN_FAILURE) {
-    perror("Erreur receive_daemon");
+    perror("Erreur receive_demon");
     exit(EXIT_FAILURE);
   } else if (thread_number == NO_THREAD) {
     printf("Fermeture du programme, pas de thread disponible\n");
@@ -85,14 +85,9 @@ int main(void) {
   }
   
   // Envoi de END car plus de commande a executé
-  if (send_daemon(fd_client, (size_t) pid, END_MSG) == -1) {
+  if (send_demon(fd_demon, (size_t) pid, END_MSG) == FUN_FAILURE) {
+    perror("Erreur send_demon");
     exit(EXIT_FAILURE);
-  }
-  
-  // Fermeture du tube restant
-  if (close(fd_demon) == FUN_FAILURE) {
-    perror("Erreur fermeture tube demon");
-    exit(EXIT_SUCCESS);
   }
   
   return EXIT_SUCCESS;
@@ -113,11 +108,6 @@ int open_client_tube(char *tube_name) {
     perror("Erreur ouverture tube démon");
     return FUN_FAILURE;
   }
-
-  /*if (unlink(tube_name) == -1) {
-    perror("Erreur suppression tube client");
-    return FUN_FAILURE;
-  }*/
   return fd;
 }
 
@@ -127,15 +117,10 @@ int open_demon_tube(void) {
     perror("Erreur ouverture tube demon");
     return FUN_FAILURE;
   }
-  
-  if (unlink(TUBE_IN) == FUN_FAILURE) {
-    perror("Erreur supression tube demon");
-    return FUN_FAILURE;
-  }
   return fd;
 }
 
-int send_daemon(int fd_tube, size_t label, char *msg) {
+int send_demon(int fd_tube, size_t label, char *msg) {
   // Ecriture de la commande a envoyée (SYNCXXX\0 ou ENDYYY\0)
   // XXX : pid, YYY : numéro shm
   char full_msg[(int) strlen(msg) + digit_count((int) label) + 1];
@@ -149,7 +134,7 @@ int send_daemon(int fd_tube, size_t label, char *msg) {
   return FUN_SUCCESS;
 }
 
-int receive_daemon(int fd_client, char *shm_name) {
+int receive_demon(int fd_client, char *shm_name) {
   // Réception de la réponse
   char reponse[SHM_NAME_LENGTH];
   if (read(fd_client, reponse, sizeof reponse) == FUN_FAILURE) {
@@ -185,12 +170,7 @@ int send_thread(char *shm_name, char *command) {
     return FUN_FAILURE;
   }
   
-  transfer *ptr = malloc(sizeof (transfer));
-  if (ptr == NULL) {
-    return FUN_FAILURE;
-  }
-  
-  ptr = mmap(NULL, sizeof (transfer), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+  transfer *ptr = mmap(NULL, sizeof (transfer), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
   if (ptr == MAP_FAILED) {
     perror("Erreur mmap send_thread");
     return FUN_FAILURE;
@@ -199,7 +179,7 @@ int send_thread(char *shm_name, char *command) {
   strcpy(ptr->command, command);
   ptr->flag = DEMON_FLAG;
 
-  if (close(shm_fd) == -1) {
+  if (close(shm_fd) == FUN_FAILURE) {
     perror("Erreur close send_thread");
     return FUN_FAILURE;
   }
@@ -214,17 +194,12 @@ int receive_thread(char *shm_name, char *result) {
     return FUN_FAILURE;
   }
   
-  transfer *ptr = malloc(sizeof (transfer));
-  if (ptr == NULL) {
-    return FUN_FAILURE;
-  }
-  
   if (ftruncate(shm_fd, sizeof(transfer)) == FUN_FAILURE) {
     perror("Erreur ftruncate");
     return FUN_FAILURE;
   }
   
-  ptr = mmap(NULL, sizeof (transfer), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+  transfer *ptr = mmap(NULL, sizeof (transfer), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
   if (ptr == MAP_FAILED) {
     perror("Erreur mmap receive_thread");
     return FUN_FAILURE;
@@ -235,7 +210,7 @@ int receive_thread(char *shm_name, char *result) {
   strcpy(result, ptr->result);
   ptr->flag = NEUTRAL_FLAG;
 
-  if (close(shm_fd) == -1) {
+  if (close(shm_fd) == FUN_FAILURE) {
     perror("Erreur close receive_thread");
     return FUN_FAILURE;
   }
