@@ -11,13 +11,16 @@
 
 #define QUIT_CMD  "quit"
 #define BEGIN     "client>"
-#define NO_THREAD -2
+
+#define NO_THREAD          -2
+#define BUFFER_SIZE        128
+#define MAX_DIGIT_SHM_SIZE 30
 
 // Fonction locale qui compte le nombre de décimal d'un entier
 int digit_count(int n);
 
 int main(void) {
-  char shm_name[SHM_NAME_LENGTH];
+  char shm_name[SHM_INFO_LENGTH];
   char tube_name[TUBE_NAME_LENGTH];
   
   pid_t pid = getpid();
@@ -50,37 +53,33 @@ int main(void) {
   }
 
   // Réception du numéro du shm et fermeture du tube
-  int thread_number = receive_demon(fd_client, shm_name);
-  if (thread_number == FUN_FAILURE) {
+  int shm_size = receive_demon(fd_client, shm_name);
+  if (shm_size == FUN_FAILURE) {
     perror("Erreur receive_demon");
     exit(EXIT_FAILURE);
-  } else if (thread_number == NO_THREAD) {
+  } else if (shm_size == NO_THREAD) {
     printf("Fermeture du programme, pas de thread disponible\n");
     exit(EXIT_SUCCESS);
   }
   
-  char command[MAX_CMD_LENGTH];
-  char result[MAX_RES_LENGTH];
-  int length;
+  char buffer[BUFFER_SIZE];
 
   // Début du prompt
   printf(BEGIN);
-  while ((length = scanf("%s", command)) != EOF 
-      && strcmp(command, QUIT_CMD) != 0) {
-    // La commande lue est trop longue
-    if (length > MAX_CMD_LENGTH) {
-      perror("Commande trop longue.");
-      continue;
-    }
-    if (send_thread(shm_name, command) == FUN_FAILURE) {
+  // Saisie de la commande et vérification du "quit"
+  while (fgets(buffer, BUFFER_SIZE, stdin) != NULL 
+      && strncmp(buffer, QUIT_CMD, strlen(QUIT_CMD)) != 0) {
+    // On enlève le caractère de retour à la ligne
+    buffer[strlen(buffer) - 1] = '\0';
+    
+    if (send_thread(shm_name, buffer, (size_t) shm_size) == FUN_FAILURE) {
       perror("Erreur send_thread");
       exit(EXIT_FAILURE);
     }
-    if (receive_thread(shm_name, result) == FUN_FAILURE) {
+    if (receive_thread(shm_name, (size_t) shm_size) == FUN_FAILURE) {
       perror("Erreur receive_thread");
       exit(EXIT_FAILURE);
     }
-    printf("%s\n", result);
     printf(BEGIN);
   }
   
@@ -130,13 +129,12 @@ int send_demon(int fd_tube, size_t label, char *msg) {
     perror("Erreur écriture tube démon");
     return FUN_FAILURE;
   }
-  
   return FUN_SUCCESS;
 }
 
 int receive_demon(int fd_client, char *shm_name) {
   // Réception de la réponse
-  char reponse[SHM_NAME_LENGTH];
+  char reponse[SHM_INFO_LENGTH];
   if (read(fd_client, reponse, sizeof reponse) == FUN_FAILURE) {
     perror("Erreur read tube client");
     return FUN_FAILURE;
@@ -146,8 +144,22 @@ int receive_demon(int fd_client, char *shm_name) {
     return NO_THREAD;
   }
   
+  // Lecture de la taille de shm
+  char size[MAX_DIGIT_SHM_SIZE];
+  int i = 0;
+  while (reponse[i] <= '9') {
+    size[i] = reponse[i];
+    ++i;
+  }
+  size[i] = '\0';
+  int shm_size = atoi(size);
+  if (shm_size == 0) {
+    perror("Mauvais taille de shm");
+    return FUN_FAILURE;
+  }
+  
   // Copie du nom de la shm
-  strcpy(shm_name, reponse);
+  strcpy(shm_name, reponse + i - 1);
   
   // On ne réutilisera pas ce tube
   if (close(fd_client) == FUN_FAILURE) {
@@ -155,29 +167,32 @@ int receive_demon(int fd_client, char *shm_name) {
     return FUN_FAILURE;
   }
   
-  return FUN_SUCCESS;
+  return shm_size;
 }
 
-int send_thread(char *shm_name, char *command) {
+int send_thread(char *shm_name, char *command, size_t shm_size) {
   int shm_fd = shm_open(shm_name, O_RDWR | O_EXCL, S_IRUSR | S_IWUSR);
   if (shm_fd == FUN_FAILURE) {
     perror("Erreur shm_open send_thread");
     return FUN_FAILURE;
   }
   
-  if (ftruncate(shm_fd, sizeof(transfer)) == FUN_FAILURE) {
+  if (ftruncate(shm_fd, (long int) shm_size) == FUN_FAILURE) {
     perror("Erreur ftruncate");
     return FUN_FAILURE;
   }
   
-  transfer *ptr = mmap(NULL, sizeof (transfer), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+  void *ptr = mmap(NULL, shm_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
   if (ptr == MAP_FAILED) {
     perror("Erreur mmap send_thread");
     return FUN_FAILURE;
   }
-
-  strcpy(ptr->command, command);
-  ptr->flag = DEMON_FLAG;
+  
+  // Copie de la commande a exécuter dans la shm
+  strcpy((char *) ptr + sizeof (int), command);
+  // On indique que la donnée est destinée au démon
+  volatile int *flag = (int *) ptr;
+  *flag = DEMON_FLAG;
 
   if (close(shm_fd) == FUN_FAILURE) {
     perror("Erreur close send_thread");
@@ -187,28 +202,36 @@ int send_thread(char *shm_name, char *command) {
   return FUN_SUCCESS;
 }
 
-int receive_thread(char *shm_name, char *result) {
+int receive_thread(char *shm_name, size_t shm_size) {
   int shm_fd = shm_open(shm_name, O_RDWR | O_EXCL, S_IRUSR | S_IWUSR);
   if (shm_fd == FUN_FAILURE) {
     perror("Erreur shm_open receive_thread");
     return FUN_FAILURE;
   }
   
-  if (ftruncate(shm_fd, sizeof(transfer)) == FUN_FAILURE) {
+  if (ftruncate(shm_fd, (long int) shm_size) == FUN_FAILURE) {
     perror("Erreur ftruncate");
     return FUN_FAILURE;
   }
   
-  transfer *ptr = mmap(NULL, sizeof (transfer), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+  void *ptr = mmap(NULL, shm_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
   if (ptr == MAP_FAILED) {
     perror("Erreur mmap receive_thread");
     return FUN_FAILURE;
   }
 
   // Attente du résultat
-  while (ptr->flag != CLIENT_FLAG);
-  strcpy(result, ptr->result);
-  ptr->flag = NEUTRAL_FLAG;
+  volatile int *flag = (int *) ptr;
+  while (*flag != CLIENT_FLAG);
+  
+  char *result = (char *) ptr + sizeof (int);
+  size_t i = 0;
+  while(result[i] != '\0') {
+    putchar(result[i]);
+    ++i;
+  }
+  *flag = NEUTRAL_FLAG;
+  result[0] = '\0';
 
   if (close(shm_fd) == FUN_FAILURE) {
     perror("Erreur close receive_thread");

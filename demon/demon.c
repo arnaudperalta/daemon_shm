@@ -35,7 +35,7 @@ struct config {
 int main(int argc, char **argv) {
   if (argc > 1 && strcmp(argv[1], ARG_DEBUG) == 0) {
 	debug = true;
-    printf("daemon_shm Debug mode :\n");
+    printf("demon Debug mode :\n");
     printf("--------------------------\n");
   } else {
     pid_t pid = fork();
@@ -61,7 +61,8 @@ int main(int argc, char **argv) {
   load_config(&cfg);
   
   // Initilisation de MIN_THREAD threads
-  thread_m *ptr = ini_thread(cfg.min_thread, cfg.max_con_per_thread, cfg.max_thread);
+  thread_m *ptr = ini_thread(cfg.min_thread, cfg.max_con_per_thread
+      , cfg.max_thread, cfg.shm_size);
   if (ptr == NULL) {
     perror("Erreur ini threads");
     exit(EXIT_FAILURE);
@@ -72,7 +73,7 @@ int main(int argc, char **argv) {
   signal(SIGINT, clear_sys_structs);
   
   // Mise en écoute du démon auprès des clients
-  if (tube_listening(&cfg, ptr) == -1) {
+  if (tube_listening(ptr, cfg.shm_size) == -1) {
     perror("Erreur tube_listening");
     exit(EXIT_FAILURE);
   }
@@ -111,7 +112,7 @@ int load_config(config *cfg) {
   return FUN_SUCCESS;
 }
 
-int tube_listening(config *cfg, thread_m *manager) {
+int tube_listening(thread_m *manager, size_t shm_size) {
   // File descriptor du tube client, on ne connait pas encore son nom
   int fd_client;
   
@@ -119,8 +120,9 @@ int tube_listening(config *cfg, thread_m *manager) {
   //   ou ENDYYY\0 y : shm_number
   char buffer_read[PID_LENGTH + MSG_LENGTH + 1];
   
-  // Les messages envoyés seront de la forme RST ou SHM_NAMEXXX (X : numero du thread)
-  char buffer_write[SHM_NAME_LENGTH] = {'0'};
+  // Les messages envoyés seront de la forme RST ou XXXSHM_NAMEYYY
+  // (XXX : taille de la shm, YYY : numero du thread)
+  char buffer_write[SHM_INFO_LENGTH] = {'0'};
 
   // Création du tube nommé que le programme client utilisera.
   if (mkfifo(TUBE_IN, S_IRUSR | S_IWUSR) == -1) {
@@ -150,7 +152,6 @@ int tube_listening(config *cfg, thread_m *manager) {
 			printf("Connection du processus %s\n", 
 				buffer_read + strlen(SYNC_MSG));
 		}
-		printf("buffer : %s\n", buffer_read);
         strcat(tube_name, buffer_read + strlen(SYNC_MSG));
         
         // Ouverture du tube client
@@ -164,7 +165,7 @@ int tube_listening(config *cfg, thread_m *manager) {
           perror("Unlink tube client");
           return FUN_FAILURE;
         }
-        int thread_number = use_thread(manager, cfg->max_con_per_thread);
+        int thread_number = use_thread(manager);
         if (thread_number == -1) {
           // Pas de thread dispo, on envoie RST
           if (write(fd_client, RST_MSG, sizeof RST_MSG) == -1) {
@@ -174,7 +175,8 @@ int tube_listening(config *cfg, thread_m *manager) {
           if (debug) printf("RST envoyé\n");
         } else {
           // Un thread est disponible, on envoie donc le nom du shm au client
-          sprintf(buffer_write, "%s%d", SHM_NAME, thread_number);
+          sprintf(buffer_write, "%zu%s%d", shm_size, SHM_NAME
+				, thread_number);
           if (write(fd_client, buffer_write, sizeof buffer_write) == -1) {
             perror("Erreur écriture tube client");
             return FUN_FAILURE;
@@ -208,7 +210,7 @@ void clear_sys_structs(int sig) {
 	// Nettoyage SHM
 	sig = 0;
 	int i = 0;
-	char shm_name[SHM_NAME_LENGTH];
+	char shm_name[SHM_INFO_LENGTH];
 	do {
 		sprintf(shm_name, "%s%d", SHM_NAME, i);
 		++i;

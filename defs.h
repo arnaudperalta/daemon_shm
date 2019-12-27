@@ -2,11 +2,8 @@
 #define DEFS__H
 
 // Fichier Header contenant des définitions communes au client et au démon
-
-#define MAX_CMD_LENGTH   100
-#define MAX_RES_LENGTH   1024
 #define TUBE_NAME_LENGTH 32
-#define SHM_NAME_LENGTH  32
+#define SHM_INFO_LENGTH  32
 #define PID_LENGTH       7
 #define THR_LENGTH       5
 #define MSG_LENGTH       4
@@ -24,12 +21,5 @@
 #define SHM_NAME  "/shm_thread_"  //dans /dev/shm/
 #define TUBE_IN   "../tubes/daemon_in"
 #define TUBE_OUT  "../tubes/tube_"
-
-// Structure de données transféré dans le shm.
-typedef struct transfer {
-  volatile int flag;
-  char command[MAX_CMD_LENGTH];
-  char result[MAX_RES_LENGTH];
-} transfer;
 
 #endif
