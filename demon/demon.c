@@ -22,6 +22,10 @@
 // Variable global de debug, on la met a true si --debug est saisi
 static bool debug = false;
 
+// Variable global de la structe du manager de thread, elle est global
+//  pour qu'elle puisse être manipuler après un signal.
+static thread_m *manager;
+
 // Fonction de nettoyage des données systeme et mémoire.
 void clear_sys_structs(int sig);
 
@@ -61,19 +65,20 @@ int main(int argc, char **argv) {
   load_config(&cfg);
   
   // Initilisation de MIN_THREAD threads
-  thread_m *ptr = ini_thread(cfg.min_thread, cfg.max_con_per_thread
+  manager = ini_thread(cfg.min_thread, cfg.max_con_per_thread
       , cfg.max_thread, cfg.shm_size);
-  if (ptr == NULL) {
+  if (manager == NULL) {
     perror("Erreur ini threads");
     exit(EXIT_FAILURE);
   }
   
-  // Nettoyage des structures systèmes sur le signal SIGINT
+  // Nettoyage des structures systèmes sur les signaux SIGINT et SIGTERM
   // On dispose aussi les structures de données.
   signal(SIGINT, clear_sys_structs);
+  signal(SIGTERM, clear_sys_structs);
   
   // Mise en écoute du démon auprès des clients
-  if (tube_listening(ptr, cfg.shm_size) == -1) {
+  if (tube_listening(cfg.shm_size) == -1) {
     perror("Erreur tube_listening");
     exit(EXIT_FAILURE);
   }
@@ -112,7 +117,7 @@ int load_config(config *cfg) {
   return FUN_SUCCESS;
 }
 
-int tube_listening(thread_m *manager, size_t shm_size) {
+int tube_listening(size_t shm_size) {
   // File descriptor du tube client, on ne connait pas encore son nom
   int fd_client;
   
@@ -166,7 +171,7 @@ int tube_listening(thread_m *manager, size_t shm_size) {
           return FUN_FAILURE;
         }
         int thread_number = use_thread(manager);
-        if (thread_number == -1) {
+        if (thread_number == FUN_FAILURE) {
           // Pas de thread dispo, on envoie RST
           if (write(fd_client, RST_MSG, sizeof RST_MSG) == -1) {
             perror("Erreur écriture tube client");
@@ -175,12 +180,14 @@ int tube_listening(thread_m *manager, size_t shm_size) {
           if (debug) printf("RST envoyé\n");
         } else {
           // Un thread est disponible, on envoie donc le nom du shm au client
+          // puis on lock le thread associé.
           sprintf(buffer_write, "%zu%s%d", shm_size, SHM_NAME
 				, thread_number);
           if (write(fd_client, buffer_write, sizeof buffer_write) == -1) {
             perror("Erreur écriture tube client");
             return FUN_FAILURE;
           }
+          lock_thread(manager, (size_t) thread_number);
           if (debug) printf("Thread %d choisi\n", thread_number);
         }
         if (close(fd_client) == -1) {
@@ -191,10 +198,12 @@ int tube_listening(thread_m *manager, size_t shm_size) {
         // Numero du thread où on annule une connection
         char number[THR_LENGTH + 1];
         strcpy(number, buffer_read + strlen(END_MSG));
-        // On dit au thread d'arrêter son execution
+        // On dit au thread d'arrêter son execution et on unlock
+        // le thread.
         if (consume_thread(manager, atoi(number) == -1)) {
           return FUN_FAILURE;
         }
+        unlock_thread(manager, (size_t) atoi(number));
         if (debug) {
 			printf("Connection terminé avec %s\n",
 			    buffer_read + strlen(END_MSG));
@@ -205,9 +214,13 @@ int tube_listening(thread_m *manager, size_t shm_size) {
 }
 
 void clear_sys_structs(int sig) {
+	// Nettoyage de la mémoire
+	if (manager != NULL) {
+		thread_dispose(manager);
+	}
 	// Nettoyage tube demon
 	unlink(TUBE_IN);
-	// Nettoyage SHM
+	// Nettoyage de dev/shm/
 	sig = 0;
 	int i = 0;
 	char shm_name[SHM_INFO_LENGTH];

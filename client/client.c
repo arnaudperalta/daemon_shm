@@ -6,6 +6,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <signal.h>
 #include "defs.h"
 #include "client.h"
 
@@ -19,8 +20,14 @@
 // Fonction locale qui compte le nombre de décimal d'un entier
 int digit_count(int n);
 
+// Fonction locale qui envoit le message de fin de connection au démon
+void send_end(int sig);
+
+// Variable globale utile pour la fonction appellé par le signal
+static int fd_demon;
+static char shm_name[SHM_INFO_LENGTH];
+
 int main(void) {
-  char shm_name[SHM_INFO_LENGTH];
   char tube_name[TUBE_NAME_LENGTH];
   
   pid_t pid = getpid();
@@ -33,7 +40,7 @@ int main(void) {
   }
   
   // Ouverture tube demon
-  int fd_demon = open_demon_tube();
+  fd_demon = open_demon_tube();
   if (fd_demon == FUN_FAILURE) {
     perror("Erreur open_demon_tube");
     exit(EXIT_FAILURE);
@@ -64,6 +71,10 @@ int main(void) {
   
   char buffer[BUFFER_SIZE];
 
+  // Récupération du signal en cas d'interruption du programme anormal
+  signal(SIGINT, send_end);
+  signal(SIGTERM, send_end);
+
   // Début du prompt
   printf(BEGIN);
   // Saisie de la commande et vérification du "quit"
@@ -83,11 +94,7 @@ int main(void) {
     printf(BEGIN);
   }
   
-  // Envoi de END car plus de commande a executé
-  if (send_demon(fd_demon, (size_t) pid, END_MSG) == FUN_FAILURE) {
-    perror("Erreur send_demon");
-    exit(EXIT_FAILURE);
-  }
+  send_end(0);
   
   return EXIT_SUCCESS;
 }
@@ -188,8 +195,14 @@ int send_thread(char *shm_name, char *command, size_t shm_size) {
     return FUN_FAILURE;
   }
   
+  char *cmdptr = (char *) ptr + sizeof (int);
+  char *endptr = cmdptr + strlen(command);
   // Copie de la commande a exécuter dans la shm
-  strcpy((char *) ptr + sizeof (int), command);
+  strcpy(cmdptr, command);
+  
+  // On indique la fin de la donnée
+  *endptr = '\0';
+  
   // On indique que la donnée est destinée au démon
   volatile int *flag = (int *) ptr;
   *flag = DEMON_FLAG;
@@ -226,7 +239,7 @@ int receive_thread(char *shm_name, size_t shm_size) {
   
   char *result = (char *) ptr + sizeof (int);
   size_t i = 0;
-  while(result[i] != '\0') {
+  while (result[i] != '\0') {
     putchar(result[i]);
     ++i;
   }
@@ -239,6 +252,17 @@ int receive_thread(char *shm_name, size_t shm_size) {
   }
 
   return FUN_SUCCESS;
+}
+
+void send_end(int sig) {
+  (void) sig;
+  // Envoi de END car plus de commande a executé
+  if (send_demon(fd_demon, (size_t) atoi(shm_name + strlen(SHM_NAME))
+      , END_MSG) == FUN_FAILURE) {
+    perror("Erreur send_demon");
+    exit(EXIT_FAILURE);
+  }
+  exit(EXIT_SUCCESS);
 }
 
 int digit_count(int n) {

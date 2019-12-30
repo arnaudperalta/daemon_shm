@@ -10,6 +10,6 @@ typedef struct config config;
 extern int load_config(config *cfg);
 
 // Fonction executée lorsque le démon passe en mode écoute.
-extern int tube_listening(thread_m *manager, size_t shm_size);
+extern int tube_listening(size_t shm_size);
 
 #endif

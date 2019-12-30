@@ -21,4 +21,10 @@ extern int consume_thread(thread_m *th, size_t number);
 
 extern int fork_execute(char *command, size_t size);
 
+extern void lock_thread(thread_m *th, size_t n);
+
+extern void unlock_thread(thread_m *th, size_t n);
+
+extern void thread_dispose(thread_m *th);
+
 #endif

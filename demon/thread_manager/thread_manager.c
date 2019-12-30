@@ -95,6 +95,7 @@ thread_m *ini_thread(size_t min_thread, size_t max_con, size_t max_thread
   ptr->count = min_thread;
   ptr->min_thread = min_thread;
   ptr->max_thread = max_thread;
+  ptr->shm_size = shm_size;
   // Allocation du tableau de pointeur de thread_e
   ptr->array = calloc(1, sizeof (thread_e *) * max_thread);
   if (ptr->array == NULL) {
@@ -119,28 +120,28 @@ void *waiting_command(void *arg) {
     // Lecture d'une commande
     volatile int *flag = (volatile int *) ptr->data;
     char *data = (char *) ptr->data + sizeof *flag;
-    while (*flag != DEMON_FLAG);
-    
-    // On lock le thread
-    pthread_mutex_lock(&(ptr->mutex));
-    // Execution
+    // En attente d'une ressource destiné au thread ou d'une demande
+    //  d'arrêt immédiat.
+    while (*flag != DEMON_FLAG && !ptr->end);
+    // Si c'est un arrêt immédiat, on s'arrête.
+    if (ptr->end) return NULL;
+
+    // Execution de la commande
     if (fork_execute(data, ptr->shm_size)
         == FUN_FAILURE) {
       perror("Erreur fork_execute");
       return NULL;
     }
+    // On assigne la ressource écrite pour le client
     *flag = CLIENT_FLAG;
-    
-    // On unlock le thread
-    pthread_mutex_unlock(&(ptr->mutex));
   }
   return NULL;
 }
 
 int use_thread(thread_m *th) {
-  for (size_t i = 0; i < th->max_thread; ++i) {
+  for (size_t i = 0; i < th->count; ++i) {
     // On verifie si ce thread est libre d'utilsation
-    if (th->array[i] == NULL ||
+    if (th->array[i] != NULL &&
         pthread_mutex_trylock(&(th->array[i]->mutex)) == 0) {
       // Un thread a été trouvé
       pthread_mutex_unlock(&(th->array[i]->mutex));
@@ -202,7 +203,6 @@ int fork_execute(char *command, size_t size) {
     perror("Erreur pipe");
     return FUN_FAILURE;
   }
-  
   switch (fork()) {
     case -1:
       perror("Erreur fork");
@@ -210,26 +210,60 @@ int fork_execute(char *command, size_t size) {
     case 0:
       // On ne lira rien sur ce prosessus
       if (close(p[0]) == FUN_FAILURE) {
+        perror("Erreur close fils");
         return FUN_FAILURE;
       }
-      // Le file descriptor de stdout est écrasé par une copie du pipe
+      // Le file descriptor de stdout est écrasé par une copie du fd du pipe
       if (dup2(p[1], STDOUT_FILENO) == FUN_FAILURE) {
+        perror("Erreur dup2 stdout");
         return FUN_FAILURE;
       }
-      if (arr[0] == NULL) break;
+      // Le file descriptor de stderr est écrasé par une copie du fd du pipe
+      if (dup2(p[1], STDERR_FILENO) == FUN_FAILURE) {
+        perror("Erreur dup2 stderr");
+        return FUN_FAILURE;
+      }
       execv(arr[0], arr);
+      // La commande a échouée
       printf("Invalid command.\n");
+      exit(EXIT_SUCCESS);
       break;
     default:
       // On n'écrira rien sur ce processus
       if (close(p[1]) == FUN_FAILURE) {
         return FUN_FAILURE;
       }
-      if (read(p[0], command, size) == FUN_FAILURE) {
+      ssize_t r = 0;
+      if ((r = read(p[0], command, size)) == FUN_FAILURE) {
         perror("Erreur lecture pipe");
         return FUN_SUCCESS;
       }
+      command[r] = '\0';
       break;
   }
   return FUN_SUCCESS;
+}
+
+void lock_thread(thread_m *th, size_t n) {
+  pthread_mutex_lock(&(th->array[n]->mutex));
+}
+
+void unlock_thread(thread_m *th, size_t n) {
+  pthread_mutex_unlock(&(th->array[n]->mutex));
+}
+
+void thread_dispose(thread_m *th) {
+  for (size_t i = 0; i < th->count; ++i) {
+    if (th->array[i] != NULL) {
+      // On arrête le thread
+      th->array[i]->end = true;
+      // On le désalloue
+      pthread_join(th->array[i]->thread, NULL);
+      free(th->array[i]);
+      th->array[i] = NULL;
+    }
+  }
+  free(th->array);
+  free(th);
+  th = NULL;
 }
