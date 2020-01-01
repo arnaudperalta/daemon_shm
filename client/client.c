@@ -8,7 +8,6 @@
 #include <fcntl.h>
 #include <signal.h>
 #include "defs.h"
-#include "client.h"
 
 #define QUIT_CMD  "quit"
 #define BEGIN     "client>"
@@ -17,13 +16,44 @@
 #define BUFFER_SIZE        128
 #define MAX_DIGIT_SHM_SIZE 30
 
+// Fonction de création du tube client pour recevoir les informations de
+// connection à la shm
+// Renvoie -1 en cas d'erreur, 0 en cas de succès
+int create_client_tube(char *tube_name);
+
+// Fonction d'ouverture du tube client
+// Renvoie -1 en cas d'erreur, 0 en cas de succès
+int open_client_tube(char *tube_name);
+
+// Fonction d'ouverture du tube du démon pour communiquer avec lui
+// Renvoie -1 en cas d'erreur, 0 en cas de succès
+int open_demon_tube(void);
+
+// Fonction d'envoie d'informations au démon à travers le tube démon
+// On envoye une commande de la forme SYNCXXX\0 ou ENDYYY\0
+// XXX : pid, YYY : numéro shm
+// Renvoie -1 en cas d'erreur, 0 en cas de succès
+int send_demon(int fd_tube, size_t label, char *msg);
+
+// Fonction de réception de donnée à partir du tube du démon
+// Renvoie -1 en cas d'erreur, -2 si aucun thread n'est disponible
+// Sinon renvoie la taille de la shm associé au thread.
+int receive_demon(int fd_client, char *shm_name);
+
+// Fonction d'envoie de commande au thread associé au client
+int send_thread(char *shm_name, char *command, size_t shm_size);
+
+// Fonction de récuperation du résultat de la commande exécuté
+// de la commande envoyé au thread associé.
+int receive_thread(char *shm_name, size_t shm_size);
+
 // Fonction locale qui compte le nombre de décimal d'un entier
 int digit_count(int n);
 
 // Fonction locale qui envoit le message de fin de connection au démon
 void send_end(int sig);
 
-// Variable globale utile pour la fonction appellé par le signal
+// Variables globale utiles pour la fonction appellé par le signal
 static int fd_demon;
 static char shm_name[SHM_INFO_LENGTH];
 
@@ -198,7 +228,8 @@ int send_thread(char *shm_name, char *command, size_t shm_size) {
   char *cmdptr = (char *) ptr + sizeof (int);
   char *endptr = cmdptr + strlen(command);
   // Copie de la commande a exécuter dans la shm
-  strcpy(cmdptr, command);
+  // On exclu 4 octets à cause du int indiquant la nature de la donnée
+  strncpy(cmdptr, command, shm_size - sizeof(int));
   
   // On indique la fin de la donnée
   *endptr = '\0';

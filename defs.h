@@ -1,7 +1,7 @@
+// Fichier Header contenant des définitions communes au client et au démon
 #ifndef DEFS__H
 #define DEFS__H
 
-// Fichier Header contenant des définitions communes au client et au démon
 #define TUBE_NAME_LENGTH 32
 #define SHM_INFO_LENGTH  32
 #define PID_LENGTH       7

@@ -15,4 +15,4 @@ clean:
 $(executable): $(objects)
 	$(CC) $(objects) $(LDFLAGS) -o $(executable)
 
-client.o: client.c client.h defs.h
+client.o: client.c defs.h

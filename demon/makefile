@@ -17,4 +17,4 @@ $(executable): $(objects)
 	$(CC) $(objects) $(LDFLAGS) -o $(executable)
 
 $(thread_managerdir)thread_manager.o: thread_manager.c thread_manager.h defs.h
-demon.o: demon.c demon.h thread_manager.h defs.h
+demon.o: demon.c thread_manager.h defs.h

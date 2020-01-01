@@ -9,7 +9,6 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <signal.h>
-#include "demon.h"
 #include "thread_manager.h"
 #include "defs.h"
 
@@ -23,19 +22,33 @@
 static bool debug = false;
 
 // Variable global de la structe du manager de thread, elle est global
-//  pour qu'elle puisse être manipuler après un signal.
+// pour qu'elle puisse être manipuler après un signal.
 static thread_m *manager;
 
 // Fonction de nettoyage des données systeme et mémoire.
 void clear_sys_structs(int sig);
 
-struct config {
+// Structure permettant de stocker la configuration lu sur demon.conf
+typedef struct config {
   size_t min_thread;
   size_t max_thread;
   size_t max_con_per_thread;
   size_t shm_size;
-};
+} config;
 
+// Fonction qui charge le fichier de configuration en mémoire.
+// Renvoie -1 en cas d'erreur, 0 en cas de succès
+int load_config(config *cfg);
+
+// Fonction executée lorsque le démon passe en mode écoute.
+// Renvoie -1 en cas d'erreur, 0 en cas de succès
+// Elle est prévu pour ne jamais s'arrêter, seul les signaux
+// peuvent y mettre fin.
+int tube_listening(size_t shm_size);
+
+// Fonction main du démon
+// Si le paramètre --debug est entré, on ne fork pas et on affiche
+// tout les messages de débug.
 int main(int argc, char **argv) {
   if (argc > 1 && strcmp(argv[1], ARG_DEBUG) == 0) {
 	debug = true;
@@ -50,9 +63,9 @@ int main(int argc, char **argv) {
     } else if (pid > 0) {
       return EXIT_SUCCESS;
     }
+    
     // Le démon est créé, on s'associe a un nouveau groupe de processus 
     // afin d'être leader du groupe. Donc pas de terminal de controle.
-    
     sid = setsid();
     if (sid < 0) {
       perror("Erreur création session"); 
@@ -73,7 +86,7 @@ int main(int argc, char **argv) {
   }
   
   // Nettoyage des structures systèmes sur les signaux SIGINT et SIGTERM
-  // On dispose aussi les structures de données.
+  // On nettoie aussi les structures de données.
   signal(SIGINT, clear_sys_structs);
   signal(SIGTERM, clear_sys_structs);
   
@@ -87,11 +100,13 @@ int main(int argc, char **argv) {
 }
 
 int load_config(config *cfg) {
+  // Ouverture du fichier
   FILE *f = fopen(CONFIG_PATH, "r");
   if (f == NULL) {
     perror("Ouverture demon.conf impossible");
     return FUN_FAILURE;
   }
+  
   // Lecture du fichier
   int count = 0;
   count += fscanf(f, "MIN_THREAD=%zu\n", &cfg->min_thread);
@@ -99,17 +114,21 @@ int load_config(config *cfg) {
   count += fscanf(f, "MAX_CONNECT_PER_THREAD=%zu\n", &cfg->max_con_per_thread);
   count += fscanf(f, "SHM_SIZE=%zu\n", &cfg->shm_size);
 
-  printf("Config :\n");
-  printf("min_thread : %zu\n", cfg->min_thread);
-  printf("max_thread : %zu\n", cfg->max_thread);
-  printf("max_con_per_thread : %zu\n", cfg->max_con_per_thread);
-  printf("shm_size : %zu\n\n", cfg->shm_size);
+  if (debug) {
+	  printf("Config :\n");
+	  printf("min_thread : %zu\n", cfg->min_thread);
+	  printf("max_thread : %zu\n", cfg->max_thread);
+	  printf("max_con_per_thread : %zu\n", cfg->max_con_per_thread);
+	  printf("shm_size : %zu\n\n", cfg->shm_size);
+  }
   
+  // Si le nombre de paramètres lu n'est pas le bon, on s'arrête
   if (count != OPTIONS_NUMBER) {
     perror("Erreur de syntaxe fichier config");
     return FUN_FAILURE;
   }
   
+  // On ferme le fichier
   if (fclose(f) == -1) {
     perror("Erreur fermeture demon.conf");
     return FUN_FAILURE;
@@ -144,6 +163,7 @@ int tube_listening(size_t shm_size) {
 
   while (1) {
 	ssize_t n = 0;
+	// Lecture sur le tube d'une potentiel message d'un client
     while ((n = read(fd_demon, buffer_read, sizeof buffer_read)) > 0) {
 	  // Préfixe supposé du tube client
 	  char tube_name[strlen(TUBE_OUT) + PID_LENGTH + 1];
@@ -187,8 +207,7 @@ int tube_listening(size_t shm_size) {
             perror("Erreur écriture tube client");
             return FUN_FAILURE;
           }
-          lock_thread(manager, (size_t) thread_number);
-          if (debug) printf("Thread %d choisi\n", thread_number);
+          if (debug) printf("Thread n°%d choisi\n", thread_number);
         }
         if (close(fd_client) == -1) {
           perror("Erreur close tube client");
@@ -200,12 +219,20 @@ int tube_listening(size_t shm_size) {
         strcpy(number, buffer_read + strlen(END_MSG));
         // On dit au thread d'arrêter son execution et on unlock
         // le thread.
-        if (consume_thread(manager, atoi(number) == -1)) {
+        int ret_value = consume_thread(manager, (size_t) atoi(number));
+        if (ret_value == FUN_FAILURE) {
+		  perror("Erreur consume_thread");
           return FUN_FAILURE;
-        }
-        unlock_thread(manager, (size_t) atoi(number));
+        } 
         if (debug) {
-			printf("Connection terminé avec %s\n",
+		  printf("Connection terminé dans le thread n°%s\n",
+		    buffer_read + strlen(END_MSG));
+		}
+		if (ret_value == 1 && debug) {
+			printf("Thread n°%s réinitialisé\n", 
+			    buffer_read + strlen(END_MSG));
+		} else if (ret_value == 2 && debug) {
+			printf("Thread n°%s terminé\n", 
 			    buffer_read + strlen(END_MSG));
 		}
       }
