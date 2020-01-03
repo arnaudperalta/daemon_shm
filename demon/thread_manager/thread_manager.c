@@ -264,7 +264,6 @@ int fork_execute(char *command, size_t size) {
         return FUN_FAILURE;
       }
       ssize_t r = 0;
-      printf("%zu\n", size);
       if ((r = read(p[0], command, size)) == FUN_FAILURE) {
         perror("Erreur lecture pipe");
         return FUN_SUCCESS;
