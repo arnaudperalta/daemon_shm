@@ -9,7 +9,7 @@ void copy_file(FILE* src, FILE* dest, size_t b, size_t e);
 
 int main(int argc, char ** argv) {
 	int opt;
-  char s_path[100] = "", d_path[100] = "";
+  char s_path[512] = "", d_path[512] = "";
   size_t b = 0, e = 0; 
   char write_type[2] = "w";
   FILE* s_f;
@@ -47,12 +47,15 @@ int main(int argc, char ** argv) {
   strcpy(d_path, argv[optind + 1]);
   s_f = fopen(s_path, "r");
   if(s_f == NULL) {
+    printf("path : %s\n", s_path); 
+    perror("fopen source file");
     exit(EXIT_FAILURE);
   }
   d_f = fopen(d_path,"r");
   if(d_f != NULL) {
     if(v) {
       fclose(s_f);
+      perror("fopen dest file : file exist");
       exit(EXIT_FAILURE);
     }
   }
