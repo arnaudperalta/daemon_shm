@@ -226,13 +226,9 @@ int send_thread(char *shm_name, char *command, size_t shm_size) {
   }
   
   char *cmdptr = (char *) ptr + sizeof (int);
-  char *endptr = cmdptr + strlen(command);
   // Copie de la commande a exécuter dans la shm
   // On exclu 4 octets à cause du int indiquant la nature de la donnée
   strncpy(cmdptr, command, shm_size - sizeof(int));
-  
-  // On indique la fin de la donnée
-  *endptr = '\0';
   
   // On indique que la donnée est destinée au démon
   volatile int *flag = (int *) ptr;

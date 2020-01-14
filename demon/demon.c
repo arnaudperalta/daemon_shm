@@ -162,8 +162,8 @@ int tube_listening(size_t shm_size) {
   }
 
   while (1) {
-	ssize_t n = 0;
-	// Lecture sur le tube d'une potentiel message d'un client
+    ssize_t n = 0;
+    // Lecture sur le tube d'une potentiel message d'un client
     while ((n = read(fd_demon, buffer_read, sizeof buffer_read)) > 0) {
 	  // Préfixe supposé du tube client
 	  char tube_name[strlen(TUBE_OUT) + PID_LENGTH + 1];
@@ -174,9 +174,9 @@ int tube_listening(size_t shm_size) {
         // Récupération d'un numero de thread libre puis on averti
         //   le client du nom du shm a écouté.
         if (debug) {
-			printf("Connection du processus %s\n", 
-				buffer_read + strlen(SYNC_MSG));
-		}
+          printf("Connection du processus %s\n", 
+              buffer_read + strlen(SYNC_MSG));
+        }
         strcat(tube_name, buffer_read + strlen(SYNC_MSG));
         
         // Ouverture du tube client
@@ -202,7 +202,7 @@ int tube_listening(size_t shm_size) {
           // Un thread est disponible, on envoie donc le nom du shm au client
           // puis on lock le thread associé.
           sprintf(buffer_write, "%zu%s%d", shm_size, SHM_NAME
-				, thread_number);
+              , thread_number);
           if (write(fd_client, buffer_write, sizeof buffer_write) == -1) {
             perror("Erreur écriture tube client");
             return FUN_FAILURE;
@@ -221,40 +221,40 @@ int tube_listening(size_t shm_size) {
         // le thread.
         int ret_value = consume_thread(manager, (size_t) atoi(number));
         if (ret_value == FUN_FAILURE) {
-		  perror("Erreur consume_thread");
+          perror("Erreur consume_thread");
           return FUN_FAILURE;
         } 
         if (debug) {
-		  printf("Connection terminé dans le thread n°%s\n",
-		    buffer_read + strlen(END_MSG));
-		}
-		if (ret_value == 1 && debug) {
-			printf("Thread n°%s réinitialisé\n", 
-			    buffer_read + strlen(END_MSG));
-		} else if (ret_value == 2 && debug) {
-			printf("Thread n°%s terminé\n", 
-			    buffer_read + strlen(END_MSG));
-		}
+          printf("Connection terminé dans le thread n°%s\n",
+          buffer_read + strlen(END_MSG));
+        }
+        if (ret_value == 1 && debug) {
+          printf("Thread n°%s réinitialisé\n", 
+          buffer_read + strlen(END_MSG));
+        } else if (ret_value == 2 && debug) {
+          printf("Thread n°%s terminé\n", 
+          buffer_read + strlen(END_MSG));
+        }
       }
     }
   }
 }
 
 void clear_sys_structs(int sig) {
-	// Nettoyage de la mémoire
-	if (manager != NULL) {
-		thread_dispose(manager);
-	}
-	// Nettoyage tube demon
-	unlink(TUBE_IN);
-	// Nettoyage de dev/shm/
-	sig = 0;
-	int i = 0;
-	char shm_name[SHM_INFO_LENGTH];
-	do {
-		sprintf(shm_name, "%s%d", SHM_NAME, i);
-		++i;
-		sig = shm_unlink(shm_name);
-	} while (sig != FUN_FAILURE);
-	exit(EXIT_SUCCESS);
+  // Nettoyage de la mémoire
+  if (manager != NULL) {
+    thread_dispose(manager);
+  }
+  // Nettoyage tube demon
+  unlink(TUBE_IN);
+  // Nettoyage de dev/shm/
+  sig = 0;
+  int i = 0;
+  char shm_name[SHM_INFO_LENGTH];
+  do {
+    sprintf(shm_name, "%s%d", SHM_NAME, i);
+    ++i;
+    sig = shm_unlink(shm_name);
+  } while (sig != FUN_FAILURE);
+  exit(EXIT_SUCCESS);
 }
